@@ -10,7 +10,7 @@
     // ============================================
 
     const CONFIG = {
-        GEMINI_API_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+        GEMINI_API_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
         PLANTUML_SERVER: 'https://www.plantuml.com/plantuml',
         LOCAL_STORAGE_KEY: 'umlai_api_key',
         LAYOUT_STORAGE_KEY: 'umlai_layout_settings'
