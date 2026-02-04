@@ -1109,11 +1109,23 @@ ${DIAGRAM_PROMPTS[state.selectedDiagramType]}`;
         elements.validationMessages = document.getElementById('validationMessages');
         elements.validationList = document.getElementById('validationList');
 
-        // Load saved API key
-        const savedKey = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
-        if (savedKey) {
-            state.apiKey = savedKey;
-            elements.apiKey.value = savedKey;
+        // Check for environment-injected API key (from Netlify env vars)
+        const envApiKey = window.UMLAI_CONFIG?.GEMINI_API_KEY;
+        if (envApiKey && envApiKey !== '' && envApiKey !== '__GEMINI_API_KEY__') {
+            state.apiKey = envApiKey;
+            // Hide the API key input section since it's pre-configured
+            const apiKeySection = document.querySelector('.api-key-section');
+            if (apiKeySection) {
+                apiKeySection.style.display = 'none';
+            }
+            console.log('Using pre-configured API key');
+        } else {
+            // Load saved API key from localStorage
+            const savedKey = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
+            if (savedKey) {
+                state.apiKey = savedKey;
+                elements.apiKey.value = savedKey;
+            }
         }
 
         // Load saved layout settings

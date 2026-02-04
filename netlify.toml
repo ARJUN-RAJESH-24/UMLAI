@@ -1,8 +1,13 @@
 [build]
+  command = "bash build.sh"
   publish = "public"
+
+[build.environment]
+  # Set GEMINI_API_KEY in Netlify dashboard: Site settings > Environment variables
 
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
