@@ -1,0 +1,208 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "behavioral-diagram",
+    "title": "Behavioral Diagram IR",
+    "description": "Schema for Activity and State Machine diagrams",
+    "oneOf": [
+        {
+            "$ref": "#/definitions/stateMachineDiagram"
+        },
+        {
+            "$ref": "#/definitions/activityDiagram"
+        }
+    ],
+    "definitions": {
+        "stateMachineDiagram": {
+            "type": "object",
+            "required": [
+                "diagramType",
+                "states",
+                "transitions"
+            ],
+            "properties": {
+                "diagramType": {
+                    "const": "state"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "states": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/state"
+                    },
+                    "minItems": 1
+                },
+                "transitions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/transition"
+                    }
+                }
+            }
+        },
+        "state": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "isInitial": {
+                    "type": "boolean"
+                },
+                "isFinal": {
+                    "type": "boolean"
+                },
+                "actions": {
+                    "type": "object",
+                    "properties": {
+                        "entry": {
+                            "type": "string"
+                        },
+                        "exit": {
+                            "type": "string"
+                        },
+                        "do": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "transition": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "to": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "trigger": {
+                    "type": "string"
+                },
+                "guard": {
+                    "type": "string"
+                },
+                "action": {
+                    "type": "string"
+                }
+            }
+        },
+        "activityDiagram": {
+            "type": "object",
+            "required": [
+                "diagramType",
+                "nodes",
+                "edges"
+            ],
+            "properties": {
+                "diagramType": {
+                    "const": "activity"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/activityNode"
+                    },
+                    "minItems": 1
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/activityEdge"
+                    }
+                },
+                "swimlanes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/swimlane"
+                    }
+                }
+            }
+        },
+        "activityNode": {
+            "type": "object",
+            "required": [
+                "id",
+                "type"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "action",
+                        "decision",
+                        "fork",
+                        "join",
+                        "initial",
+                        "final",
+                        "flowFinal"
+                    ]
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "activityEdge": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "to": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "guard": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "swimlane": {
+            "type": "object",
+            "required": [
+                "name",
+                "nodes"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}

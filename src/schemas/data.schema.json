@@ -1,0 +1,124 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "data-diagram",
+    "title": "Data Diagram IR",
+    "description": "Schema for ER/Data diagrams",
+    "type": "object",
+    "required": [
+        "diagramType",
+        "entities",
+        "relationships"
+    ],
+    "properties": {
+        "diagramType": {
+            "type": "string",
+            "enum": [
+                "er"
+            ]
+        },
+        "title": {
+            "type": "string"
+        },
+        "entities": {
+            "type": "array",
+            "items": {
+                "$ref": "#/definitions/entity"
+            },
+            "minItems": 1
+        },
+        "relationships": {
+            "type": "array",
+            "items": {
+                "$ref": "#/definitions/entityRelationship"
+            }
+        }
+    },
+    "definitions": {
+        "entity": {
+            "type": "object",
+            "required": [
+                "name",
+                "attributes"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "attributes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entityAttribute"
+                    }
+                }
+            }
+        },
+        "entityAttribute": {
+            "type": "object",
+            "required": [
+                "name",
+                "type"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "type": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "isPrimaryKey": {
+                    "type": "boolean"
+                },
+                "isForeignKey": {
+                    "type": "boolean"
+                },
+                "isNullable": {
+                    "type": "boolean"
+                },
+                "references": {
+                    "type": "string"
+                }
+            }
+        },
+        "cardinality": {
+            "type": "string",
+            "enum": [
+                "1",
+                "0..1",
+                "*",
+                "1..*",
+                "0..*"
+            ]
+        },
+        "entityRelationship": {
+            "type": "object",
+            "required": [
+                "from",
+                "to",
+                "fromCardinality",
+                "toCardinality"
+            ],
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "to": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "fromCardinality": {
+                    "$ref": "#/definitions/cardinality"
+                },
+                "toCardinality": {
+                    "$ref": "#/definitions/cardinality"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
