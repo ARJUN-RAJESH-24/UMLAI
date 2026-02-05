@@ -10,7 +10,9 @@
     // ============================================
 
     const CONFIG = {
-        GEMINI_API_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+        // Using Groq API - 14,400 free requests/day, no credit card required
+        GROQ_API_URL: 'https://api.groq.com/openai/v1/chat/completions',
+        GROQ_MODEL: 'llama-3.3-70b-versatile',
         PLANTUML_SERVER: 'https://www.plantuml.com/plantuml',
         LOCAL_STORAGE_KEY: 'umlai_api_key',
         LAYOUT_STORAGE_KEY: 'umlai_layout_settings'
@@ -607,21 +609,27 @@
     // API & Generation
     // ============================================
 
-    async function callGeminiAPI(prompt) {
+    async function callLLMAPI(prompt) {
         if (!state.apiKey) {
-            throw new Error('Please enter your Gemini API key');
+            throw new Error('Please enter your Groq API key');
         }
 
-        const response = await fetch(`${CONFIG.GEMINI_API_URL}?key=${state.apiKey}`, {
+        const response = await fetch(CONFIG.GROQ_API_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.apiKey}`
+            },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    temperature: 0.1,
-                    topP: 0.95,
-                    maxOutputTokens: 8192
-                }
+                model: CONFIG.GROQ_MODEL,
+                messages: [
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                temperature: 0.1,
+                max_tokens: 8192
             })
         });
 
@@ -631,7 +639,7 @@
         }
 
         const data = await response.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return data.choices?.[0]?.message?.content || '';
     }
 
     function parseIRFromResponse(text) {
@@ -657,7 +665,7 @@
         }
 
         if (!state.apiKey) {
-            showToast('Please enter your Gemini API key', 'error');
+            showToast('Please enter your Groq API key', 'error');
             elements.apiKey.focus();
             return;
         }
@@ -672,7 +680,7 @@ ${DIAGRAM_PROMPTS[state.selectedDiagramType]}`;
 
             const fullPrompt = `${systemPrompt}\n\nREQUIREMENTS:\n${input}\n\nRespond with ONLY JSON:`;
 
-            const response = await callGeminiAPI(fullPrompt);
+            const response = await callLLMAPI(fullPrompt);
             const ir = parseIRFromResponse(response);
 
             state.currentIR = ir;
