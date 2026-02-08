@@ -15,7 +15,10 @@
         GROQ_MODEL: 'llama-3.3-70b-versatile',
         PLANTUML_SERVER: 'https://www.plantuml.com/plantuml',
         LOCAL_STORAGE_KEY: 'umlai_api_key',
-        LAYOUT_STORAGE_KEY: 'umlai_layout_settings'
+        LAYOUT_STORAGE_KEY: 'umlai_layout_settings',
+        THEME_STORAGE_KEY: 'umlai_theme',
+        MAX_RETRIES: 3,
+        RETRY_DELAY_MS: 1000
     };
 
     const state = {
@@ -24,7 +27,10 @@
         currentIR: null,
         currentPlantUML: '',
         currentMDJ: '',
+        currentInput: '',
         zoomLevel: 1,
+        fullscreenZoom: 1,
+        isLightTheme: false,
         layoutSettings: {
             direction: 'top-to-bottom',
             theme: 'default',
@@ -60,7 +66,24 @@
         loadingOverlay: null,
         toast: null,
         validationMessages: null,
-        validationList: null
+        validationList: null,
+        // New elements
+        themeToggle: null,
+        shortcutHintBtn: null,
+        examplesBtn: null,
+        examplesDropdown: null,
+        historyToggleBtn: null,
+        historyPanel: null,
+        historyPanelClose: null,
+        historyList: null,
+        historyClearBtn: null,
+        panelOverlay: null,
+        fullscreenBtn: null,
+        fullscreenModal: null,
+        fullscreenContainer: null,
+        fullscreenClose: null,
+        fullscreenZoomIn: null,
+        fullscreenZoomOut: null
     };
 
     // ============================================
@@ -609,37 +632,73 @@
     // API & Generation
     // ============================================
 
-    async function callLLMAPI(prompt) {
+    async function callLLMAPI(prompt, retryCount = 0) {
         if (!state.apiKey) {
             throw new Error('Please enter your Groq API key');
         }
 
-        const response = await fetch(CONFIG.GROQ_API_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${state.apiKey}`
-            },
-            body: JSON.stringify({
-                model: CONFIG.GROQ_MODEL,
-                messages: [
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.1,
-                max_tokens: 8192
-            })
-        });
+        try {
+            const response = await fetch(CONFIG.GROQ_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${state.apiKey}`
+                },
+                body: JSON.stringify({
+                    model: CONFIG.GROQ_MODEL,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 8192
+                })
+            });
 
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error?.message || 'API request failed');
+            if (!response.ok) {
+                const error = await response.json();
+                const errorMessage = error.error?.message || 'API request failed';
+
+                // Handle rate limits with retry
+                if (response.status === 429 && retryCount < CONFIG.MAX_RETRIES) {
+                    const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, retryCount);
+                    showToast(`Rate limited. Retrying in ${delay / 1000}s... (${retryCount + 1}/${CONFIG.MAX_RETRIES})`, 'info');
+                    await new Promise(r => setTimeout(r, delay));
+                    return callLLMAPI(prompt, retryCount + 1);
+                }
+
+                // Handle server errors with retry
+                if (response.status >= 500 && retryCount < CONFIG.MAX_RETRIES) {
+                    const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, retryCount);
+                    showToast(`Server error. Retrying in ${delay / 1000}s... (${retryCount + 1}/${CONFIG.MAX_RETRIES})`, 'info');
+                    await new Promise(r => setTimeout(r, delay));
+                    return callLLMAPI(prompt, retryCount + 1);
+                }
+
+                // Provide helpful error messages
+                if (response.status === 401) {
+                    throw new Error('Invalid API key. Please check your Groq API key.');
+                } else if (response.status === 429) {
+                    throw new Error('Rate limit exceeded. Please wait a moment and try again.');
+                } else {
+                    throw new Error(errorMessage);
+                }
+            }
+
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || '';
+        } catch (error) {
+            // Network errors - retry
+            if (error.name === 'TypeError' && retryCount < CONFIG.MAX_RETRIES) {
+                const delay = CONFIG.RETRY_DELAY_MS * Math.pow(2, retryCount);
+                showToast(`Network error. Retrying in ${delay / 1000}s... (${retryCount + 1}/${CONFIG.MAX_RETRIES})`, 'info');
+                await new Promise(r => setTimeout(r, delay));
+                return callLLMAPI(prompt, retryCount + 1);
+            }
+            throw error;
         }
-
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content || '';
     }
 
     function parseIRFromResponse(text) {
@@ -672,6 +731,7 @@
 
         showLoading(true);
         hideValidation();
+        state.currentInput = input;
 
         try {
             const systemPrompt = `You are a UML extraction expert. Output ONLY valid JSON, no explanation.
@@ -695,11 +755,23 @@ ${DIAGRAM_PROMPTS[state.selectedDiagramType]}`;
             // Generate StarUML MDJ
             state.currentMDJ = generateStarUMLMDJ(ir);
 
-            // Update UI
-            elements.codeOutput.querySelector('code').textContent = plantUML;
+            // Update UI with syntax highlighting
+            updateCodeOutput(plantUML);
 
             // Render diagram
             await renderDiagram(plantUML);
+
+            // Save to history
+            if (window.HistoryManager) {
+                window.HistoryManager.saveToHistory({
+                    input: input,
+                    diagramType: state.selectedDiagramType,
+                    ir: ir,
+                    plantUML: plantUML,
+                    mdj: state.currentMDJ
+                });
+                updateHistoryPanel();
+            }
 
             showToast('UML generated successfully!', 'success');
 
@@ -710,6 +782,40 @@ ${DIAGRAM_PROMPTS[state.selectedDiagramType]}`;
         } finally {
             showLoading(false);
         }
+    }
+
+    // Syntax highlighting for PlantUML code
+    function updateCodeOutput(code) {
+        const keywords = ['@startuml', '@enduml', 'class', 'interface', 'abstract', 'enum', 'package',
+            'entity', 'participant', 'actor', 'database', 'node', 'component', 'state',
+            'start', 'stop', 'if', 'then', 'else', 'endif', 'fork', 'end', 'alt', 'loop', 'opt'];
+        const operators = ['->', '-->', '--|>', '..|>', '*--', 'o--', '--', '..', '-0)-', '-('];
+
+        let highlighted = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        // Highlight comments
+        highlighted = highlighted.replace(/('\..*$)/gm, '<span class="comment">$1</span>');
+        highlighted = highlighted.replace(/(^\s*'.*$)/gm, '<span class="comment">$1</span>');
+
+        // Highlight annotations
+        highlighted = highlighted.replace(/(@\w+)/g, '<span class="annotation">$1</span>');
+
+        // Highlight keywords
+        keywords.forEach(kw => {
+            const regex = new RegExp(`\\b(${kw})\\b`, 'gi');
+            highlighted = highlighted.replace(regex, '<span class="keyword">$1</span>');
+        });
+
+        // Highlight strings
+        highlighted = highlighted.replace(/("[^"]*")/g, '<span class="string">$1</span>');
+
+        // Highlight types after colon
+        highlighted = highlighted.replace(/: (\w+)/g, ': <span class="type">$1</span>');
+
+        elements.codeOutput.querySelector('code').innerHTML = highlighted;
     }
 
     async function renderDiagram(plantUML) {
@@ -1117,6 +1223,24 @@ ${DIAGRAM_PROMPTS[state.selectedDiagramType]}`;
         elements.validationMessages = document.getElementById('validationMessages');
         elements.validationList = document.getElementById('validationList');
 
+        // New elements
+        elements.themeToggle = document.getElementById('themeToggle');
+        elements.shortcutHintBtn = document.getElementById('shortcutHintBtn');
+        elements.examplesBtn = document.getElementById('examplesBtn');
+        elements.examplesDropdown = document.getElementById('examplesDropdown');
+        elements.historyToggleBtn = document.getElementById('historyToggleBtn');
+        elements.historyPanel = document.getElementById('historyPanel');
+        elements.historyPanelClose = document.getElementById('historyPanelClose');
+        elements.historyList = document.getElementById('historyList');
+        elements.historyClearBtn = document.getElementById('historyClearBtn');
+        elements.panelOverlay = document.getElementById('panelOverlay');
+        elements.fullscreenBtn = document.getElementById('fullscreenBtn');
+        elements.fullscreenModal = document.getElementById('fullscreenModal');
+        elements.fullscreenContainer = document.getElementById('fullscreenContainer');
+        elements.fullscreenClose = document.getElementById('fullscreenClose');
+        elements.fullscreenZoomIn = document.getElementById('fullscreenZoomIn');
+        elements.fullscreenZoomOut = document.getElementById('fullscreenZoomOut');
+
         // Check for environment-injected API key (from Netlify env vars)
         const envApiKey = window.UMLAI_CONFIG?.GEMINI_API_KEY;
         if (envApiKey && envApiKey !== '' && envApiKey !== '__GEMINI_API_KEY__') {
@@ -1144,10 +1268,318 @@ ${DIAGRAM_PROMPTS[state.selectedDiagramType]}`;
             } catch (e) { }
         }
 
+        // Load saved theme
+        const savedTheme = localStorage.getItem(CONFIG.THEME_STORAGE_KEY);
+        if (savedTheme === 'light') {
+            state.isLightTheme = true;
+            document.documentElement.classList.add('light');
+        }
+
         setupEventListeners();
         createLayoutControls();
+        initNewFeatures();
 
         console.log('UML AI Generator initialized');
+    }
+
+    // ============================================
+    // New Features Initialization
+    // ============================================
+
+    function initNewFeatures() {
+        // Theme toggle
+        if (elements.themeToggle) {
+            elements.themeToggle.addEventListener('click', toggleTheme);
+        }
+
+        // Keyboard shortcuts
+        if (elements.shortcutHintBtn && window.KeyboardShortcuts) {
+            elements.shortcutHintBtn.addEventListener('click', () => {
+                window.KeyboardShortcuts.showShortcutsModal();
+            });
+
+            // Register shortcut handlers
+            window.KeyboardShortcuts.initShortcuts();
+            window.KeyboardShortcuts.registerHandler('generate', generateUML);
+            window.KeyboardShortcuts.registerHandler('copy', () => elements.copyBtn?.click());
+            window.KeyboardShortcuts.registerHandler('downloadSvg', () => elements.downloadSvgBtn?.click());
+            window.KeyboardShortcuts.registerHandler('downloadPng', () => elements.downloadPngBtn?.click());
+            window.KeyboardShortcuts.registerHandler('downloadPuml', () => elements.downloadPumlBtn?.click());
+            window.KeyboardShortcuts.registerHandler('closeModal', closeAllModals);
+            window.KeyboardShortcuts.registerHandler('fullscreen', toggleFullscreen);
+            window.KeyboardShortcuts.registerHandler('showShortcuts', () => {
+                window.KeyboardShortcuts.showShortcutsModal();
+            });
+            window.KeyboardShortcuts.registerHandler('restoreLast', restoreLastFromHistory);
+        }
+
+        // Examples dropdown
+        if (elements.examplesBtn && window.ExampleTemplates) {
+            initExamplesDropdown();
+        }
+
+        // History panel
+        if (elements.historyToggleBtn && window.HistoryManager) {
+            initHistoryPanel();
+        }
+
+        // Fullscreen preview
+        if (elements.fullscreenBtn) {
+            initFullscreenPreview();
+        }
+    }
+
+    function toggleTheme() {
+        state.isLightTheme = !state.isLightTheme;
+        document.documentElement.classList.toggle('light', state.isLightTheme);
+        localStorage.setItem(CONFIG.THEME_STORAGE_KEY, state.isLightTheme ? 'light' : 'dark');
+    }
+
+    function closeAllModals() {
+        // Close shortcuts modal
+        if (window.KeyboardShortcuts) {
+            window.KeyboardShortcuts.hideShortcutsModal();
+        }
+
+        // Close fullscreen
+        if (elements.fullscreenModal?.classList.contains('show')) {
+            elements.fullscreenModal.classList.remove('show');
+        }
+
+        // Close history panel
+        closeHistoryPanel();
+
+        // Close examples dropdown
+        if (elements.examplesDropdown?.classList.contains('show')) {
+            elements.examplesDropdown.classList.remove('show');
+            elements.examplesBtn?.classList.remove('open');
+        }
+    }
+
+    // Examples Dropdown
+    function initExamplesDropdown() {
+        const examples = window.ExampleTemplates.getAllExamples();
+        const icons = {
+            class: '📦', sequence: '🔄', state: '🎯', activity: '⚡',
+            component: '🧩', deployment: '🖥️', package: '📁', er: '🗄️'
+        };
+
+        let currentType = '';
+        let html = '';
+
+        examples.forEach(ex => {
+            if (ex.type !== currentType) {
+                currentType = ex.type;
+                html += `<div class="example-category">${currentType.toUpperCase()} DIAGRAMS</div>`;
+            }
+            html += `
+                <div class="example-item" data-type="${ex.type}" data-prompt="${encodeURIComponent(ex.prompt)}">
+                    <span class="icon">${icons[ex.type] || '📊'}</span>
+                    <span class="title">${ex.title}</span>
+                </div>
+            `;
+        });
+
+        elements.examplesDropdown.innerHTML = html;
+
+        // Toggle dropdown
+        elements.examplesBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = elements.examplesDropdown.classList.toggle('show');
+            elements.examplesBtn.classList.toggle('open', isOpen);
+        });
+
+        // Handle example click
+        elements.examplesDropdown.addEventListener('click', (e) => {
+            const item = e.target.closest('.example-item');
+            if (item) {
+                const type = item.dataset.type;
+                const prompt = decodeURIComponent(item.dataset.prompt);
+
+                // Update diagram type
+                state.selectedDiagramType = type;
+                elements.diagramTypes.querySelectorAll('.diagram-type-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.type === type);
+                });
+
+                // Set prompt
+                elements.nlInput.value = prompt;
+                elements.nlInput.dispatchEvent(new Event('input'));
+
+                // Close dropdown
+                elements.examplesDropdown.classList.remove('show');
+                elements.examplesBtn.classList.remove('open');
+
+                showToast('Example loaded! Click Generate to create diagram.', 'success');
+            }
+        });
+
+        // Close on outside click
+        document.addEventListener('click', () => {
+            elements.examplesDropdown.classList.remove('show');
+            elements.examplesBtn.classList.remove('open');
+        });
+    }
+
+    // History Panel
+    function initHistoryPanel() {
+        elements.historyToggleBtn.addEventListener('click', openHistoryPanel);
+        elements.historyPanelClose.addEventListener('click', closeHistoryPanel);
+        elements.panelOverlay.addEventListener('click', closeHistoryPanel);
+        elements.historyClearBtn.addEventListener('click', () => {
+            if (confirm('Clear all diagram history?')) {
+                window.HistoryManager.clearHistory();
+                showToast('History cleared', 'success');
+            }
+        });
+
+        // Listen for history updates
+        window.addEventListener('historyUpdated', updateHistoryPanel);
+
+        // Initial render
+        updateHistoryPanel();
+    }
+
+    function openHistoryPanel() {
+        elements.historyPanel.classList.add('open');
+        elements.panelOverlay.classList.add('show');
+    }
+
+    function closeHistoryPanel() {
+        elements.historyPanel.classList.remove('open');
+        elements.panelOverlay.classList.remove('show');
+    }
+
+    function updateHistoryPanel() {
+        const history = window.HistoryManager.getHistory();
+
+        if (history.length === 0) {
+            elements.historyList.innerHTML = `
+                <div class="history-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <p>No diagrams yet</p>
+                    <p>Generated diagrams will appear here</p>
+                </div>
+            `;
+            return;
+        }
+
+        elements.historyList.innerHTML = history.map(item => `
+            <div class="history-item" data-id="${item.id}">
+                <span class="history-item-icon">${window.HistoryManager.getDiagramIcon(item.diagramType)}</span>
+                <div class="history-item-content">
+                    <div class="history-item-preview">${item.inputPreview}</div>
+                    <div class="history-item-meta">${item.diagramType} • ${window.HistoryManager.formatTimestamp(item.timestamp)}</div>
+                </div>
+                <button class="history-item-delete" data-id="${item.id}" title="Delete">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                    </svg>
+                </button>
+            </div>
+        `).join('');
+
+        // Handle item click
+        elements.historyList.querySelectorAll('.history-item').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if (e.target.closest('.history-item-delete')) return;
+                restoreFromHistory(el.dataset.id);
+            });
+        });
+
+        // Handle delete
+        elements.historyList.querySelectorAll('.history-item-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.HistoryManager.deleteHistoryItem(btn.dataset.id);
+                showToast('Diagram removed from history', 'success');
+            });
+        });
+    }
+
+    function restoreFromHistory(id) {
+        const item = window.HistoryManager.getHistoryItem(id);
+        if (!item) return;
+
+        // Restore state
+        state.selectedDiagramType = item.diagramType;
+        state.currentIR = item.ir;
+        state.currentPlantUML = item.plantUML;
+        state.currentMDJ = item.mdj;
+
+        // Update UI
+        elements.nlInput.value = item.input;
+        elements.nlInput.dispatchEvent(new Event('input'));
+        elements.diagramTypes.querySelectorAll('.diagram-type-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.type === item.diagramType);
+        });
+        updateCodeOutput(item.plantUML);
+        renderDiagram(item.plantUML);
+
+        closeHistoryPanel();
+        showToast('Diagram restored from history', 'success');
+    }
+
+    function restoreLastFromHistory() {
+        const history = window.HistoryManager?.getHistory();
+        if (history && history.length > 0) {
+            restoreFromHistory(history[0].id);
+        }
+    }
+
+    // Fullscreen Preview
+    function initFullscreenPreview() {
+        elements.fullscreenBtn.addEventListener('click', toggleFullscreen);
+        elements.fullscreenClose.addEventListener('click', closeFullscreen);
+        elements.fullscreenModal.addEventListener('click', (e) => {
+            if (e.target === elements.fullscreenModal) closeFullscreen();
+        });
+
+        elements.fullscreenZoomIn.addEventListener('click', () => {
+            state.fullscreenZoom = Math.min(4, state.fullscreenZoom + 0.25);
+            updateFullscreenZoom();
+        });
+
+        elements.fullscreenZoomOut.addEventListener('click', () => {
+            state.fullscreenZoom = Math.max(0.25, state.fullscreenZoom - 0.25);
+            updateFullscreenZoom();
+        });
+    }
+
+    function toggleFullscreen() {
+        if (elements.fullscreenModal.classList.contains('show')) {
+            closeFullscreen();
+        } else {
+            openFullscreen();
+        }
+    }
+
+    function openFullscreen() {
+        const img = elements.diagramPreview.querySelector('img');
+        if (!img) {
+            showToast('Generate a diagram first', 'error');
+            return;
+        }
+
+        state.fullscreenZoom = 1;
+        elements.fullscreenContainer.innerHTML = `<img src="${img.src}" alt="UML Diagram">`;
+        elements.fullscreenModal.classList.add('show');
+        updateFullscreenZoom();
+    }
+
+    function closeFullscreen() {
+        elements.fullscreenModal.classList.remove('show');
+    }
+
+    function updateFullscreenZoom() {
+        const img = elements.fullscreenContainer.querySelector('img');
+        if (img) {
+            img.style.transform = `scale(${state.fullscreenZoom})`;
+        }
     }
 
     // Start when DOM is ready
